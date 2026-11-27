@@ -13,8 +13,38 @@ for f in sorted(glob.glob(SRC + "/*.ipynb")):
 def md(t, i):
     return {"cell_type": "markdown", "id": hashlib.md5(t.encode()).hexdigest()[:8] + str(i), "metadata": {"codeCollapsed": True}, "source": t.strip("\n")}
 
+TOLERANT = {
+"unpublish": """USE ROLE ACCOUNTADMIN;
+-- Each step tolerates objects that were never created, so cleanup works even if you stopped early.
+EXECUTE IMMEDIATE $$
+BEGIN
+  BEGIN ALTER SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT DROP AGENT STUDENT360_LAB.AGENTS.ADVISOR_ASSISTANT; EXCEPTION WHEN OTHER THEN NULL; END;
+  BEGIN ALTER SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT DROP AGENT STUDENT360_LAB.AGENTS.STUDENT_SUCCESS_ANALYST; EXCEPTION WHEN OTHER THEN NULL; END;
+  RETURN 'Lab agents removed from CoWork (if they were published)';
+END;
+$$;""",
+"revoke_me": """USE ROLE ACCOUNTADMIN;
+EXECUTE IMMEDIATE $$
+DECLARE me STRING DEFAULT CURRENT_USER();
+BEGIN
+  BEGIN EXECUTE IMMEDIATE 'REVOKE ROLE STUDENT360_LAB_ADVISOR_ENGINEERING FROM USER "' || me || '"'; EXCEPTION WHEN OTHER THEN NULL; END;
+  BEGIN EXECUTE IMMEDIATE 'REVOKE ROLE STUDENT360_LAB_IR_ANALYST FROM USER "' || me || '"'; EXCEPTION WHEN OTHER THEN NULL; END;
+  RETURN 'Persona roles revoked from ' || me || ' (if granted)';
+END;
+$$;""",
+"drop_cost_objects": """USE ROLE ACCOUNTADMIN;
+EXECUTE IMMEDIATE $$
+BEGIN
+  BEGIN DROP SNOWFLAKE.CORE.BUDGET IF EXISTS STUDENT360_LAB.AGENTS.AI_BUDGET; EXCEPTION WHEN OTHER THEN NULL; END;
+  RETURN 'Budget dropped (if it existed)';
+END;
+$$;""",
+}
+
 def pick(name):
     c = json.loads(json.dumps(code[name]))
+    if name in TOLERANT:
+        c["source"] = "%%sql -r " + c["metadata"]["name"] + "\n" + TOLERANT[name]
     c["source"] = c["source"].replace("ROWCOUNT => 2000", "ROWCOUNT => 1200")
     return c
 
@@ -118,8 +148,28 @@ GRANT  ROLE STUDENT360_LAB_IR_ANALYST TO USER <your_user>;
 
 ### Going further (not run in the hour)
 The full workshop adds a scored **evaluation gate** (`EXECUTE_AI_EVALUATION`, with a refusal test), agent-as-code spec capture, per-user quotas and CoWork branding: https://github.com/sfc-gh-isuryawinata/student360_workshop""",
-"## 7. Clean up\n🛠️ Removes only this lab's objects and only your own agents from the shared CoWork object.",
-"unpublish", "revoke_me", "drop_cost_objects", "drop_database", "drop_roles", "verify_clean",
 """## ✅ Done
-Six siloed sources became one governed Student 360, an AI assistant that respects who is asking, and a CoWork experience, in about an hour.""",
+Six siloed sources became one governed Student 360, an AI assistant that respects who is asking, and a CoWork experience, in about an hour.
+
+**When you are finished:** run `Express_4_Cleanup` to remove everything this lab created.""",
+])
+
+build("Express_4_Cleanup.ipynb", [
+"""# Student 360 in 1 Hour - Cleanup
+⏱ **~2 min.** Run this only when you are finished with the lab.
+
+⚠️ Removes **only** the `STUDENT360_LAB` objects: your agents from the shared CoWork object, your persona role grants, the budget, the database, warehouse and roles. The shared CoWork object and other teams' agents are left untouched.""",
+"06:set_context",
+"## 1. Unpublish the lab agents from CoWork\n🛠️ Only your own agents are dropped; the shared object is never replaced or removed.",
+"unpublish",
+"## 2. Remove persona roles from your user",
+"revoke_me",
+"## 3. Drop the budget",
+"drop_cost_objects",
+"## 4. Drop the database, warehouse and roles\n🔹 Dropping the database removes agents, semantic view, search services, dynamic tables, policies and tags in one step.",
+"drop_database", "drop_roles",
+"## 5. Verify\n📌 The first three commands should return no rows. The last may still list other teams' agents in the shared CoWork object; that is expected.",
+"verify_clean",
+"""## ✅ Clean
+Nothing from the lab remains, and the shared CoWork object is as you found it.""",
 ])
